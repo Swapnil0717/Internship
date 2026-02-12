@@ -17,12 +17,18 @@ export class User {
   name: string;
 
   @Column({ nullable: true })
-  googleId: string;
+  googleId?: string;
+
+  @Column({ nullable: true })
+  password?: string;
 
   @Column({
     type: 'enum',
     enum: UserRole,
-    default: UserRole.PATIENT,
+    default: UserRole.PATIENT
   })
   role: UserRole;
+
+  @Column({ nullable: true })
+  specialization?: string;
 }

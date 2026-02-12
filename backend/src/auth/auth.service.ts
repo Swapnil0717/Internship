@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from '../user/user.entity';
 import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
@@ -12,7 +13,7 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async googleLogin(googleUser: any) {
+  async googleLogin(googleUser: any, role: UserRole) {
     let user = await this.userRepo.findOne({
       where: { email: googleUser.email },
     });
@@ -22,9 +23,8 @@ export class AuthService {
         email: googleUser.email,
         name: googleUser.name,
         googleId: googleUser.googleId,
-        role: googleUser.role || UserRole.PATIENT,
+        role: role || UserRole.PATIENT,
       });
-
       await this.userRepo.save(user);
     }
 
@@ -33,10 +33,23 @@ export class AuthService {
       role: user.role,
     });
 
-    return {
-      message: 'Login successful',
-      user,
-      token,
-    };
+    return { user, token };
   }
+
+  async completeSignup(userId: number, password: string, specialization?: string) {
+    const user = await this.userRepo.findOneBy({ id: userId });
+  
+    if (!user) {
+      throw new Error('User not found');
+    }
+  
+    user.password = await bcrypt.hash(password, 10);
+  
+    if (user.role === UserRole.DOCTOR) {
+      user.specialization = specialization;
+    }
+  
+    return this.userRepo.save(user);
+  }
+  
 }

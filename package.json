@@ -1,5 +1,9 @@
 {
   "dependencies": {
-    "@nestjs/config": "^4.0.3"
+    "@nestjs/config": "^4.0.3",
+    "bcrypt": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0"
   }
 }
