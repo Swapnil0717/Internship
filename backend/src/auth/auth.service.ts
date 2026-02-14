@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User, UserRole } from '../user/user.entity';
+import { User } from '../user/user.entity';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 
@@ -13,43 +13,80 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async googleLogin(googleUser: any, role: UserRole) {
-    let user = await this.userRepo.findOne({
-      where: { email: googleUser.email },
-    });
+  async googleLogin(data: any) {
+    // Check if user exists
+    let user = await this.userRepo.findOne({ where: { email: data.email } });
 
     if (!user) {
+      // Create new user
       user = this.userRepo.create({
-        email: googleUser.email,
-        name: googleUser.name,
-        googleId: googleUser.googleId,
-        role: role || UserRole.PATIENT,
+        email: data.email,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        role: data.role,
+        isProfileCompleted: false,
       });
+
       await this.userRepo.save(user);
     }
 
-    const token = this.jwtService.sign({
-      sub: user.id,
-      role: user.role,
-    });
+    const tokens = await this.generateTokens(user);
+    await this.updateRefreshToken(user.id, tokens.refreshToken);
 
-    return { user, token };
+    return tokens;
   }
 
-  async completeSignup(userId: number, password: string, specialization?: string) {
-    const user = await this.userRepo.findOneBy({ id: userId });
-  
-    if (!user) {
-      throw new Error('User not found');
+  async completeProfile(userId: number, password: string, confirmPassword: string, specialization?: string) {
+    if (password !== confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
     }
-  
-    user.password = await bcrypt.hash(password, 10);
-  
-    if (user.role === UserRole.DOCTOR) {
+
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const hashed = await bcrypt.hash(password, 10);
+    user.password = hashed;
+
+    if (user.role === 'doctor') {
+      if (!specialization) throw new BadRequestException('Doctor must provide specialization');
       user.specialization = specialization;
     }
-  
-    return this.userRepo.save(user);
+
+    user.isProfileCompleted = true;
+    await this.userRepo.save(user);
+
+    return { message: 'Profile completed successfully' };
   }
-  
+
+  async generateTokens(user: User) {
+    const payload = { sub: user.id, email: user.email, role: user.role };
+
+    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
+    const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+
+    return { accessToken, refreshToken };
+  }
+
+  async updateRefreshToken(userId: number, refreshToken: string) {
+    const hashed = await bcrypt.hash(refreshToken, 10);
+    await this.userRepo.update(userId, { refreshToken: hashed });
+  }
+
+  async refreshToken(refreshToken: string) {
+    try {
+      const payload = this.jwtService.verify(refreshToken);
+      const user = await this.userRepo.findOne({ where: { id: payload.sub } });
+
+      if (!user || !user.refreshToken) throw new UnauthorizedException();
+
+      const match = await bcrypt.compare(refreshToken, user.refreshToken);
+      if (!match) throw new UnauthorizedException();
+
+      const tokens = await this.generateTokens(user);
+      await this.updateRefreshToken(user.id, tokens.refreshToken);
+      return tokens;
+    } catch {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+  }
 }

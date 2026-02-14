@@ -1,8 +1,14 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 export enum UserRole {
-  DOCTOR = 'DOCTOR',
-  PATIENT = 'PATIENT',
+  DOCTOR = 'doctor',
+  PATIENT = 'patient',
 }
 
 @Entity()
@@ -13,22 +19,33 @@ export class User {
   @Column({ unique: true })
   email: string;
 
-  @Column()
-  name: string;
+  @Column({ nullable: true })
+  firstName: string;
 
   @Column({ nullable: true })
-  googleId?: string;
-
-  @Column({ nullable: true })
-  password?: string;
+  lastName: string;
 
   @Column({
     type: 'enum',
     enum: UserRole,
-    default: UserRole.PATIENT
   })
   role: UserRole;
 
   @Column({ nullable: true })
-  specialization?: string;
+  password: string;
+
+  @Column({ nullable: true })
+  specialization: string;
+
+  @Column({ default: false })
+  isProfileCompleted: boolean;
+
+  @Column({ nullable: true })
+  refreshToken: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 }

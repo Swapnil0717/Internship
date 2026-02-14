@@ -6,21 +6,21 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { GoogleStrategy } from './google.strategy';
 import { User } from '../user/user.entity';
+import { JwtStrategy } from '../common/jwt.strategy';
+import { GoogleAuthGuard } from './google-auth.guard';
 
 @Module({
   imports: [
+    ConfigModule,
     TypeOrmModule.forFeature([User]),
-
     JwtModule.registerAsync({
-      imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '7d' },
+      useFactory: (config: ConfigService) => ({
+        secret: config.get('JWT_SECRET'),
       }),
     }),
   ],
-  providers: [AuthService, GoogleStrategy],
+  providers: [AuthService, GoogleStrategy, JwtStrategy, GoogleAuthGuard],
   controllers: [AuthController],
 })
 export class AuthModule {}

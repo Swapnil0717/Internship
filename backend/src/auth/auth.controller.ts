@@ -1,30 +1,55 @@
-import { Controller, Get, Req, Query, UseGuards, Post, Body } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import {
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  Body,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { UserRole } from '../user/user.entity';
+import { GoogleAuthGuard } from './google-auth.guard';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import type { Response } from 'express';
 
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  /**
+   * Start Google OAuth
+   * Example: /auth/google?state=patient
+   */
   @Get('google')
-  @UseGuards(AuthGuard('google'))
-  async googleAuth(@Query('role') role: UserRole) {}
-
-  @Get('google/callback')
-  @UseGuards(AuthGuard('google'))
-  async googleCallback(@Req() req, @Query('role') role: UserRole) {
-    return this.authService.googleLogin(req.user, role);
+  @UseGuards(GoogleAuthGuard)
+  async googleAuth(@Query('state') state: string) {
+    // Nothing needed here; Passport handles redirect to Google
   }
 
-  @Post('complete-signup')
-  async completeSignup(
-    @Body() body: { userId: number; password: string; specialization?: string }
-  ) {
-    return this.authService.completeSignup(
-      body.userId,
-      body.password,
-      body.specialization
+  /**
+   * Google OAuth callback
+   */
+  @Get('google/callback')
+  @UseGuards(GoogleAuthGuard)
+  async googleCallback(@Req() req, @Res() res: Response) {
+    const tokens = await this.authService.googleLogin(req.user);
+    return res.json(tokens);
+  }
+
+  /**
+   * Complete user profile (password + specialization)
+   * Requires JWT token in Authorization header
+   */
+  @Post('complete-profile')
+  @UseGuards(JwtAuthGuard)
+  async completeProfile(@Req() req, @Body() body: any) {
+    const { password, confirmPassword, specialization } = body;
+    return this.authService.completeProfile(
+      req.user.sub, // user ID from JWT
+      password,
+      confirmPassword,
+      specialization,
     );
   }
 }
