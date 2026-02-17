@@ -1,32 +1,51 @@
-import { Injectable, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from '../user/user.entity';
+import { Repository, DeepPartial } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+
+import { User, UserRole } from '../user/user.entity';
+import { CompleteProfileDto } from './dto/complete-profile';
+
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
-    private userRepo: Repository<User>,
-    private jwtService: JwtService,
+    private readonly userRepo: Repository<User>,
+    private readonly jwtService: JwtService,
   ) {}
 
-  async googleLogin(data: any) {
-    // Check if user exists
-    let user = await this.userRepo.findOne({ where: { email: data.email } });
+  // =========================
+  // GOOGLE LOGIN
+  // =========================
+  async googleLogin(data: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: UserRole;
+    phoneNumber?: string;
+  }) {
+    let user = await this.userRepo.findOne({
+      where: { email: data.email },
+    });
 
     if (!user) {
-      // Create new user
-      user = this.userRepo.create({
+      const newUser: DeepPartial<User> = {
         email: data.email,
         firstName: data.firstName,
         lastName: data.lastName,
         role: data.role,
+        phoneNumber: data.phoneNumber,
         isProfileCompleted: false,
-      });
+      };
 
+      user = this.userRepo.create(newUser);
       await this.userRepo.save(user);
     }
 
@@ -36,35 +55,64 @@ export class AuthService {
     return tokens;
   }
 
-  async completeProfile(userId: number, password: string, confirmPassword: string, specialization?: string) {
-    if (password !== confirmPassword) {
-      throw new BadRequestException('Passwords do not match');
-    }
+  // =========================
+  // COMPLETE PROFILE ✅
+  // =========================
+// =========================
+// COMPLETE PROFILE
+// =========================
+async completeProfile(userId: number, dto: CompleteProfileDto) {
+  const { password, confirmPassword, phoneNumber, specialization } = dto;
 
-    const user = await this.userRepo.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    const hashed = await bcrypt.hash(password, 10);
-    user.password = hashed;
-
-    if (user.role === 'doctor') {
-      if (!specialization) throw new BadRequestException('Doctor must provide specialization');
-      user.specialization = specialization;
-    }
-
-    user.isProfileCompleted = true;
-    await this.userRepo.save(user);
-
-    return { message: 'Profile completed successfully' };
+  if (password !== confirmPassword) {
+    throw new BadRequestException('Passwords do not match');
   }
 
+  const user = await this.userRepo.findOne({
+    where: { id: userId },
+  });
+
+  if (!user) {
+    throw new NotFoundException('User not found');
+  }
+
+  // Hash password
+  user.password = await bcrypt.hash(password, 10);
+
+  // Save phone
+  user.phoneNumber = phoneNumber;
+
+  // If doctor, specialization required
+  if (user.role === UserRole.DOCTOR) {
+    if (!specialization) {
+      throw new BadRequestException(
+        'Doctor must provide specialization',
+      );
+    }
+
+    user.specialization = specialization;
+  }
+
+  user.isProfileCompleted = true;
+
+  await this.userRepo.save(user);
+
+  return { message: 'Profile completed successfully' };
+}
+  // =========================
+  // TOKENS
+  // =========================
   async generateTokens(user: User) {
-    const payload = { sub: user.id, email: user.email, role: user.role };
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    };
 
-    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
-    const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
-
-    return { accessToken, refreshToken };
+    return {
+      accessToken: this.jwtService.sign(payload, { expiresIn: '15m' }),
+      refreshToken: this.jwtService.sign(payload, { expiresIn: '7d' }),
+    };
   }
 
   async updateRefreshToken(userId: number, refreshToken: string) {
@@ -75,15 +123,26 @@ export class AuthService {
   async refreshToken(refreshToken: string) {
     try {
       const payload = this.jwtService.verify(refreshToken);
-      const user = await this.userRepo.findOne({ where: { id: payload.sub } });
+      const user = await this.userRepo.findOne({
+        where: { id: payload.sub },
+      });
 
-      if (!user || !user.refreshToken) throw new UnauthorizedException();
+      if (!user || !user.refreshToken) {
+        throw new UnauthorizedException();
+      }
 
-      const match = await bcrypt.compare(refreshToken, user.refreshToken);
-      if (!match) throw new UnauthorizedException();
+      const valid = await bcrypt.compare(
+        refreshToken,
+        user.refreshToken,
+      );
+
+      if (!valid) {
+        throw new UnauthorizedException();
+      }
 
       const tokens = await this.generateTokens(user);
       await this.updateRefreshToken(user.id, tokens.refreshToken);
+
       return tokens;
     } catch {
       throw new UnauthorizedException('Invalid refresh token');

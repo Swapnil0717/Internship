@@ -12,4 +12,7 @@ export class RegisterPatientDto {
 
   @MinLength(6)
   confirmPassword: string;
+
+  @MinLength(10)
+  phoneNumber: string;
 }

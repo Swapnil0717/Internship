@@ -1,10 +1,13 @@
+import { Slot } from 'src/slots/slot.entity';
 import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
+import { Appointment } from '../appointment/appointment.entity';
 
 export enum UserRole {
   DOCTOR = 'doctor',
@@ -35,6 +38,9 @@ export class User {
   password: string;
 
   @Column({ nullable: true })
+  phoneNumber: string;
+
+  @Column({ nullable: true })
   specialization: string;
 
   @Column({ default: false })
@@ -42,6 +48,18 @@ export class User {
 
   @Column({ nullable: true })
   refreshToken: string;
+
+  // =========================
+  // RELATIONS
+  // =========================
+
+  // Doctor → Slots
+  @OneToMany(() => Slot, (slot) => slot.doctor)
+  slots: Slot[];
+
+  // Patient → Appointments
+  @OneToMany(() => Appointment, (appointment) => appointment.patient)
+  appointments: Appointment[];
 
   @CreateDateColumn()
   createdAt: Date;

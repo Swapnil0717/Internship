@@ -15,4 +15,7 @@ export class RegisterDoctorDto {
 
   @IsNotEmpty()
   specialization: string;
+
+  @MinLength(10)
+  phoneNumber: string;
 }
