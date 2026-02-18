@@ -1,19 +1,33 @@
-import { IsArray, IsDateString, IsString, Matches } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsNumber,
+} from 'class-validator';
+import { SlotMode } from '../slot.entity';
 
 export class RecurringSlotDto {
   @IsArray()
   @IsString({ each: true })
   days: string[]; // ["Monday", "Tuesday"]
 
-  @IsDateString()
+  @IsString()
   startDate: string;
 
-  @IsDateString()
+  @IsString()
   endDate: string;
 
-  @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+  @IsString()
   startTime: string;
 
-  @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+  @IsString()
   endTime: string;
+
+  @IsEnum(SlotMode)
+  mode: SlotMode;
+
+  @IsOptional()
+  @IsNumber()
+  capacity?: number;
 }

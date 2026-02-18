@@ -1,58 +1,68 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Slot } from './slot.entity';
+import { Slot, SlotMode, SlotType } from './slot.entity';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { RecurringSlotDto } from './dto/recurring-slot.dto';
-import { User } from '../user/user.entity';
 
 @Injectable()
-export class SlotService {
+export class SlotsService {
   constructor(
     @InjectRepository(Slot)
-    private slotRepo: Repository<Slot>,
-
-    @InjectRepository(User)
-    private userRepo: Repository<User>,
+    private readonly slotRepo: Repository<Slot>,
   ) {}
 
-  // -----------------------------
-  // CREATE CUSTOM SLOT
-  // -----------------------------
+  // ==============================
+  // CREATE SLOT (CUSTOM / AUTO OVERRIDE)
+  // ==============================
   async createSlot(doctorId: number, dto: CreateSlotDto) {
-    const doctor = await this.userRepo.findOne({
-      where: { id: doctorId },
-    });
+    const today = new Date().toISOString().split('T')[0];
 
-    if (!doctor) throw new BadRequestException('Doctor not found');
+    // 🔴 WAVE validation
+    if (dto.mode === SlotMode.WAVE && !dto.capacity) {
+      throw new BadRequestException(
+        'WAVE slot requires capacity',
+      );
+    }
+
+    // 🔥 AUTOMATIC OVERRIDE LOGIC
+    if (
+      dto.slotType === SlotType.CUSTOM &&
+      dto.date === today
+    ) {
+      await this.slotRepo.update(
+        {
+          doctor: { id: doctorId },
+          date: today,
+          slotType: SlotType.RECURRING,
+        },
+        { isActive: false },
+      );
+    }
 
     const slot = this.slotRepo.create({
       ...dto,
-      doctor,
+      doctor: { id: doctorId },
       isActive: true,
     });
 
     return this.slotRepo.save(slot);
   }
 
-  // -----------------------------
-  // CREATE MULTI-WEEKDAY RECURRING
-  // -----------------------------
+  // ==============================
+  // CREATE RECURRING SLOTS (STREAM + WAVE)
+  // ==============================
   async createRecurringSlots(
     doctorId: number,
     dto: RecurringSlotDto,
   ) {
-    const doctor = await this.userRepo.findOne({
-      where: { id: doctorId },
-    });
-
-    if (!doctor) throw new BadRequestException('Doctor not found');
-
-    const start = new Date(dto.startDate);
-    const end = new Date(dto.endDate);
-
-    if (start > end) {
-      throw new BadRequestException('Invalid date range');
+    if (dto.mode === SlotMode.WAVE && !dto.capacity) {
+      throw new BadRequestException(
+        'Recurring WAVE slots require capacity',
+      );
     }
 
     const dayMap: Record<string, number> = {
@@ -65,57 +75,63 @@ export class SlotService {
       Saturday: 6,
     };
 
-    const targetDays = dto.days.map((d) => {
-      if (!(d in dayMap))
-        throw new BadRequestException(`Invalid day: ${d}`);
-      return dayMap[d];
-    });
+    const targetDays = dto.days.map(
+      (d) => dayMap[d],
+    );
+
+    const start = new Date(dto.startDate);
+    const end = new Date(dto.endDate);
 
     const slots: Slot[] = [];
     const current = new Date(start);
 
     while (current <= end) {
       if (targetDays.includes(current.getDay())) {
-        const dateStr = current.toISOString().split('T')[0];
+        const dateStr = current
+          .toISOString()
+          .split('T')[0];
 
-        const slot = this.slotRepo.create({
-          doctor,
-          date: dateStr,
-          startTime: dto.startTime,
-          endTime: dto.endTime,
-          isActive: true,
-        });
-
-        slots.push(slot);
+        slots.push(
+          this.slotRepo.create({
+            date: dateStr,
+            startTime: dto.startTime,
+            endTime: dto.endTime,
+            slotType: SlotType.RECURRING,
+            mode: dto.mode,
+            capacity: dto.capacity,
+            doctor: { id: doctorId },
+            isActive: true,
+          }),
+        );
       }
-
       current.setDate(current.getDate() + 1);
     }
 
     return this.slotRepo.save(slots);
   }
 
-  // -----------------------------
-  // VIEW DOCTOR SLOTS
-  // -----------------------------
-  async getDoctorSlots(doctorId: number) {
+  // ==============================
+  // DOCTOR VIEW (FUTURE + CANCELLED)
+  // ==============================
+  async getDoctorSlots(
+    doctorId: number,
+    includeCancelled: boolean,
+  ) {
+    const where: any = {
+      doctor: { id: doctorId },
+    };
+
+    if (!includeCancelled) {
+      where.isActive = true;
+    }
+
     return this.slotRepo.find({
-      where: { doctor: { id: doctorId } },
-      order: { date: 'ASC' },
+      where,
+      relations: ['appointments'],
+      order: {
+        date: 'ASC',
+        startTime: 'ASC',
+      },
     });
-  }
-
-  // -----------------------------
-  // CANCEL SLOT
-  // -----------------------------
-  async cancelSlot(slotId: number, doctorId: number) {
-    const slot = await this.slotRepo.findOne({
-      where: { id: slotId, doctor: { id: doctorId } },
-    });
-
-    if (!slot) throw new BadRequestException('Slot not found');
-
-    slot.isActive = false;
-    return this.slotRepo.save(slot);
   }
 }

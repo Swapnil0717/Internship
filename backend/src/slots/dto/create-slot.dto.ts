@@ -1,12 +1,23 @@
-import { IsDateString, Matches } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsNumber } from 'class-validator';
+import { SlotMode, SlotType } from '../slot.entity';
 
 export class CreateSlotDto {
-  @IsDateString()
+  @IsString()
   date: string;
 
-  @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+  @IsString()
   startTime: string;
 
-  @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+  @IsString()
   endTime: string;
+
+  @IsEnum(SlotType)
+  slotType: SlotType;
+
+  @IsEnum(SlotMode)
+  mode: SlotMode;
+
+  @IsOptional()
+  @IsNumber()
+  capacity?: number;
 }
