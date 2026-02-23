@@ -1,23 +1,23 @@
-import { IsEnum, IsOptional, IsString, IsNumber } from 'class-validator';
-import { SlotMode, SlotType } from '../slot.entity';
+import { SlotMode, SlotType, SessionType } from '../slot.enums';
 
 export class CreateSlotDto {
-  @IsString()
-  date: string;
+  days?: string[];
 
-  @IsString()
+  startDate?: string;
+  endDate?: string;
+
+  date?: string;
+
   startTime: string;
-
-  @IsString()
   endTime: string;
 
-  @IsEnum(SlotType)
-  slotType: SlotType;
+  mode?: SlotMode;
 
-  @IsEnum(SlotMode)
-  mode: SlotMode;
+  slotType?: SlotType;
 
-  @IsOptional()
-  @IsNumber()
-  capacity?: number;
+  maxPatient: number;
+
+  session: SessionType;
+
+  duration: number; // minutes per patient
 }

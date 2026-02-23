@@ -1,137 +1,137 @@
-import {
-  Injectable,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Slot, SlotMode, SlotType } from './slot.entity';
+import dayjs from 'dayjs';
+import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
+
+import { Slot } from './slot.entity';
 import { CreateSlotDto } from './dto/create-slot.dto';
-import { RecurringSlotDto } from './dto/recurring-slot.dto';
+import { SlotType, SlotMode } from './slot.enums';
+import { User } from '../user/user.entity';
+
+dayjs.extend(isSameOrBefore);
 
 @Injectable()
 export class SlotsService {
   constructor(
     @InjectRepository(Slot)
     private readonly slotRepo: Repository<Slot>,
+
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
   ) {}
 
-  // ==============================
-  // CREATE SLOT (CUSTOM / AUTO OVERRIDE)
-  // ==============================
-  async createSlot(doctorId: number, dto: CreateSlotDto) {
-    const today = new Date().toISOString().split('T')[0];
-
-    // 🔴 WAVE validation
-    if (dto.mode === SlotMode.WAVE && !dto.capacity) {
-      throw new BadRequestException(
-        'WAVE slot requires capacity',
-      );
-    }
-
-    // 🔥 AUTOMATIC OVERRIDE LOGIC
-    if (
-      dto.slotType === SlotType.CUSTOM &&
-      dto.date === today
-    ) {
-      await this.slotRepo.update(
-        {
-          doctor: { id: doctorId },
-          date: today,
-          slotType: SlotType.RECURRING,
-        },
-        { isActive: false },
-      );
-    }
-
-    const slot = this.slotRepo.create({
-      ...dto,
-      doctor: { id: doctorId },
-      isActive: true,
+  // ✅ FIXED: accept doctorId instead of User
+  async createSlot(dto: CreateSlotDto, doctorId: number) {
+    const doctor = await this.userRepo.findOne({
+      where: { id: doctorId },
     });
 
-    return this.slotRepo.save(slot);
-  }
-
-  // ==============================
-  // CREATE RECURRING SLOTS (STREAM + WAVE)
-  // ==============================
-  async createRecurringSlots(
-    doctorId: number,
-    dto: RecurringSlotDto,
-  ) {
-    if (dto.mode === SlotMode.WAVE && !dto.capacity) {
-      throw new BadRequestException(
-        'Recurring WAVE slots require capacity',
-      );
+    if (!doctor) {
+      throw new NotFoundException('Doctor not found');
     }
 
-    const dayMap: Record<string, number> = {
-      Sunday: 0,
-      Monday: 1,
-      Tuesday: 2,
-      Wednesday: 3,
-      Thursday: 4,
-      Friday: 5,
-      Saturday: 6,
-    };
+    if (dto.slotType === SlotType.CUSTOM) {
+      return this.createCustomSlot(dto, doctor);
+    }
 
-    const targetDays = dto.days.map(
-      (d) => dayMap[d],
-    );
+    return this.createRecurringSlots(dto, doctor);
+  }
 
-    const start = new Date(dto.startDate);
-    const end = new Date(dto.endDate);
+  async getDoctorSlots(doctorId: number) {
+    return this.slotRepo.find({
+      where: { doctor: { id: doctorId } },
+      relations: ['doctor'],
+      order: { date: 'ASC' },
+    });
+  }
 
+  // 🔒 keep private
+  private async createRecurringSlots(dto: CreateSlotDto, doctor: User) {
     const slots: Slot[] = [];
-    const current = new Date(start);
+    let current = dayjs(dto.startDate);
+    const end = dayjs(dto.endDate);
 
-    while (current <= end) {
-      if (targetDays.includes(current.getDay())) {
-        const dateStr = current
-          .toISOString()
-          .split('T')[0];
+    while (current.isSameOrBefore(end)) {
+      const dayName = current.format('dddd');
+
+      if (dto.days && dto.days.includes(dayName)) {
+        const subSlots = this.generateSubSlots(
+          dto.startTime,
+          dto.endTime,
+          dto.duration,
+        );
 
         slots.push(
           this.slotRepo.create({
-            date: dateStr,
+            date: current.format('YYYY-MM-DD'),
             startTime: dto.startTime,
             endTime: dto.endTime,
-            slotType: SlotType.RECURRING,
             mode: dto.mode,
-            capacity: dto.capacity,
-            doctor: { id: doctorId },
-            isActive: true,
+            slotType: SlotType.RECURRING,
+            maxPatient: dto.maxPatient,
+            session: dto.session,
+            duration: dto.duration,
+            subSlots,
+            doctor,
           }),
         );
       }
-      current.setDate(current.getDate() + 1);
+
+      current = current.add(1, 'day');
     }
 
     return this.slotRepo.save(slots);
   }
 
-  // ==============================
-  // DOCTOR VIEW (FUTURE + CANCELLED)
-  // ==============================
-  async getDoctorSlots(
-    doctorId: number,
-    includeCancelled: boolean,
-  ) {
-    const where: any = {
-      doctor: { id: doctorId },
-    };
+  private async createCustomSlot(dto: CreateSlotDto, doctor: User) {
+    const subSlots = this.generateSubSlots(
+      dto.startTime,
+      dto.endTime,
+      dto.duration,
+    );
 
-    if (!includeCancelled) {
-      where.isActive = true;
+    const slot = this.slotRepo.create({
+      date: dto.date,
+      startTime: dto.startTime,
+      endTime: dto.endTime,
+      slotType: SlotType.CUSTOM,
+      maxPatient: dto.maxPatient,
+      session: dto.session,
+      duration: dto.duration,
+      subSlots,
+      doctor,
+    });
+
+    return this.slotRepo.save(slot);
+  }
+
+  private generateSubSlots(
+    startTime: string,
+    endTime: string,
+    duration: number,
+  ) {
+    const slots: {
+      startTime: string;
+      endTime: string;
+      bookedCount: number;
+    }[] = [];
+
+    let current = dayjs(`2026-01-01 ${startTime}`);
+    const end = dayjs(`2026-01-01 ${endTime}`);
+
+    while (current.add(duration, 'minute').isSameOrBefore(end)) {
+      const next = current.add(duration, 'minute');
+
+      slots.push({
+        startTime: current.format('HH:mm'),
+        endTime: next.format('HH:mm'),
+        bookedCount: 0,
+      });
+
+      current = next;
     }
 
-    return this.slotRepo.find({
-      where,
-      relations: ['appointments'],
-      order: {
-        date: 'ASC',
-        startTime: 'ASC',
-      },
-    });
+    return slots;
   }
 }

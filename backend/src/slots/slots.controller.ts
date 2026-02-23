@@ -4,37 +4,26 @@ import {
   Body,
   Req,
   Get,
-  Query,
   UseGuards,
 } from '@nestjs/common';
 import { SlotsService } from './slots.service';
 import { CreateSlotDto } from './dto/create-slot.dto';
-import { RecurringSlotDto } from './dto/recurring-slot.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('slots')
-@UseGuards(JwtAuthGuard)
 export class SlotsController {
   constructor(private readonly slotsService: SlotsService) {}
 
+  @UseGuards(JwtAuthGuard)
   @Post()
   createSlot(@Req() req, @Body() dto: CreateSlotDto) {
-    return this.slotsService.createSlot(req.user.sub, dto);
+    // ✅ correct order: dto first, doctorId second
+    return this.slotsService.createSlot(dto, req.user.sub);
   }
 
-  @Post('recurring')
-  createRecurring(@Req() req, @Body() dto: RecurringSlotDto) {
-    return this.slotsService.createRecurringSlots(req.user.sub, dto);
-  }
-
+  @UseGuards(JwtAuthGuard)
   @Get('doctor')
-  getDoctorSlots(
-    @Req() req,
-    @Query('includeCancelled') includeCancelled: string,
-  ) {
-    return this.slotsService.getDoctorSlots(
-      req.user.sub,
-      includeCancelled === 'true',
-    );
+  getDoctorSlots(@Req() req) {
+    return this.slotsService.getDoctorSlots(req.user.sub);
   }
 }

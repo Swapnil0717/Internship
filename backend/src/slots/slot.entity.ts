@@ -3,20 +3,9 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
-  OneToMany,
 } from 'typeorm';
 import { User } from '../user/user.entity';
-import { Appointment } from '../appointment/appointment.entity';
-
-export enum SlotType {
-  CUSTOM = 'CUSTOM',
-  RECURRING = 'RECURRING',
-}
-
-export enum SlotMode {
-  STREAM = 'STREAM',
-  WAVE = 'WAVE',
-}
+import { SlotType, SlotMode, SessionType } from './slot.enums';
 
 @Entity()
 export class Slot {
@@ -24,7 +13,7 @@ export class Slot {
   id: number;
 
   @Column()
-  date: string; // YYYY-MM-DD
+  date: string;
 
   @Column()
   startTime: string;
@@ -41,18 +30,32 @@ export class Slot {
   @Column({
     type: 'enum',
     enum: SlotMode,
+    nullable: true,
   })
   mode: SlotMode;
 
-  @Column({ nullable: true })
-  capacity: number; // required only for WAVE
+  @Column({
+    type: 'enum',
+    enum: SessionType,
+  })
+  session: SessionType;
+
+  @Column()
+  duration: number;
+
+  @Column()
+  maxPatient: number;
 
   @Column({ default: true })
   isActive: boolean;
 
-  @ManyToOne(() => User, (user) => user.slots)
-  doctor: User;
+  @Column({ type: 'json', nullable: true })
+  subSlots: {
+    startTime: string;
+    endTime: string;
+    bookedCount: number;
+  }[];
 
-  @OneToMany(() => Appointment, (appt) => appt.slot)
-  appointments: Appointment[];
+  @ManyToOne(() => User, { eager: true })
+  doctor: User;
 }

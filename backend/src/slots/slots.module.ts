@@ -5,10 +5,11 @@ import { User } from '../user/user.entity';
 import { SlotsController } from './slots.controller';
 import { SlotsService } from './slots.service';
 
-
 @Module({
-  imports: [TypeOrmModule.forFeature([Slot, User])],
+  imports: [
+    TypeOrmModule.forFeature([Slot, User]), // ✅ VERY IMPORTANT
+  ],
   controllers: [SlotsController],
   providers: [SlotsService],
 })
-export class SlotModule {}
+export class SlotsModule {}

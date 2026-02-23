@@ -5,7 +5,8 @@ import {
   IsString,
   IsNumber,
 } from 'class-validator';
-import { SlotMode } from '../slot.entity';
+import { SlotMode } from '../slot.enums';
+
 
 export class RecurringSlotDto {
   @IsArray()

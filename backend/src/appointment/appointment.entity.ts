@@ -1,9 +1,9 @@
 import {
   Entity,
   PrimaryGeneratedColumn,
+  Column,
   ManyToOne,
   CreateDateColumn,
-  Column,
 } from 'typeorm';
 import { User } from '../user/user.entity';
 import { Slot } from '../slots/slot.entity';
@@ -13,15 +13,17 @@ export class Appointment {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => User, (user) => user.appointments)
+  @ManyToOne(() => User, { eager: true })
   patient: User;
 
-  @ManyToOne(() => Slot, (slot) => slot.appointments, {
-    eager: true,
-  })
+  @ManyToOne(() => Slot, { eager: true })
   slot: Slot;
 
-  @Column({ default: 'BOOKED' })
+  @Column({
+    type: 'enum',
+    enum: ['BOOKED', 'CANCELLED', 'COMPLETED'],
+    default: 'BOOKED',
+  })
   status: string;
 
   @CreateDateColumn()
