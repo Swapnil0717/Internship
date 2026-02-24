@@ -8,23 +8,27 @@ import {
   UseGuards,
   Query,
 } from '@nestjs/common';
+import type { Response } from 'express';
+
 import { AuthService } from './auth.service';
+import { CompleteProfileDto } from './dto/complete-profile';
 import { GoogleAuthGuard } from './google-auth.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import type { Response } from 'express';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private readonly authService: AuthService) {}
 
   /**
    * Start Google OAuth
-   * Example: /auth/google?state=patient
+   * Example:
+   * GET /auth/google?state=doctor
+   * GET /auth/google?state=patient
    */
   @Get('google')
   @UseGuards(GoogleAuthGuard)
   async googleAuth(@Query('state') state: string) {
-    // Nothing needed here; Passport handles redirect to Google
+    // Passport handles redirect
   }
 
   /**
@@ -38,18 +42,15 @@ export class AuthController {
   }
 
   /**
-   * Complete user profile (password + specialization)
-   * Requires JWT token in Authorization header
+   * Complete user profile
+   * Requires JWT access token
    */
   @Post('complete-profile')
   @UseGuards(JwtAuthGuard)
-  async completeProfile(@Req() req, @Body() body: any) {
-    const { password, confirmPassword, specialization } = body;
-    return this.authService.completeProfile(
-      req.user.sub, // user ID from JWT
-      password,
-      confirmPassword,
-      specialization,
-    );
+  async completeProfile(
+    @Req() req,
+    @Body() dto: CompleteProfileDto,
+  ) {
+    return this.authService.completeProfile(req.user.sub, dto);
   }
 }
