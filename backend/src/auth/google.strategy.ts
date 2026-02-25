@@ -10,7 +10,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     super({
       clientID: configService.get<string>('GOOGLE_CLIENT_ID'),
       clientSecret: configService.get<string>('GOOGLE_CLIENT_SECRET'),
-      callbackURL: 'https://internship-production-4f70.up.railway.app',
+      callbackURL: 'http://localhost:3000/auth/google/callback',
       scope: ['email', 'profile'],
       passReqToCallback: true,
       prompt: 'select_account consent',
