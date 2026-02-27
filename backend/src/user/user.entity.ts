@@ -68,7 +68,7 @@ export class User {
   @OneToMany(() => Slot, (slot) => slot.doctor)
   slots: Slot[];
 
-  @OneToMany(() => Appointment, (appointment) => appointment.patient)
+  @OneToMany(() => Appointment, appointment => appointment.patient)
   appointments: Appointment[];
 
   // =============================

@@ -1,14 +1,22 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+
 import { Slot } from './slot.entity';
 import { User } from '../user/user.entity';
-import { SlotsController } from './slots.controller';
-import { SlotsService } from './slots.service';
-
+import { SlotController } from './slots.controller';
+import { SlotService } from './slots.service';
+import { SlotModificationLog } from './slot-modification-log.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Slot, User])],
-  controllers: [SlotsController],
-  providers: [SlotsService],
+  imports: [
+    TypeOrmModule.forFeature([
+      Slot,
+      User,
+      SlotModificationLog, 
+    ]),
+  ],
+  controllers: [SlotController],
+  providers: [SlotService],
+  exports: [SlotService],
 })
-export class SlotModule {}
+export class SlotsModule {}

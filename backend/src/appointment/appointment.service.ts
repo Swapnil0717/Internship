@@ -1,17 +1,20 @@
 import {
   Injectable,
-  NotFoundException,
   BadRequestException,
+  NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 
-import { Appointment } from './appointment.entity';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
+
+import { Appointment, AppointmentStatus } from './appointment.entity';
+import { Slot } from '../slots/slot.entity';
 import { User } from '../user/user.entity';
-import { Slot } from 'src/slots/slot.entity';
 
 @Injectable()
 export class AppointmentService {
+
   constructor(
     @InjectRepository(Appointment)
     private appointmentRepo: Repository<Appointment>,
@@ -21,81 +24,104 @@ export class AppointmentService {
 
     @InjectRepository(User)
     private userRepo: Repository<User>,
+
+    private dataSource: DataSource,
   ) {}
 
-  // ===============================
-  // CREATE BOOKING
-  // ===============================
-  async createBooking(userId: number, dto: { slotId: number }) {
-    const slot = await this.slotRepo.findOne({
-      where: { id: dto.slotId, isActive: true },
-      relations: ['doctor'],
+  async bookAppointment(patientId: number, slotId: number) {
+
+    return this.dataSource.transaction(async (manager) => {
+
+      const slot = await manager
+          .createQueryBuilder(Slot, 'slot')
+          .innerJoinAndSelect('slot.doctor','doctor')
+          .setLock('pessimistic_write')
+          .where('slot.id = :id',{ id: slotId })
+          .getOne();
+
+      if (!slot) throw new NotFoundException('Slot not found');
+
+      const patient = await manager.findOne(User, {
+        where: { id: patientId },
+      });
+
+      if (!patient || patient.role !== 'PATIENT')
+        throw new ForbiddenException('Only patient can book');
+
+      if (slot.currentPatients >= slot.maxPatients)
+        throw new BadRequestException('Slot full');
+
+      const exists = await manager.findOne(Appointment, {
+        where: {
+          patient: { id: patientId },
+          slot: { id: slotId },
+          status: AppointmentStatus.BOOKED,
+        },
+      });
+
+      if (exists)
+        throw new BadRequestException('Already booked');
+
+      slot.currentPatients++;
+
+      await manager.save(slot);
+
+      return manager.save(
+        manager.create(Appointment, {
+          patient,
+          doctor: slot.doctor,
+          slot,
+          status: AppointmentStatus.BOOKED,
+        }),
+      );
     });
-
-    if (!slot) {
-      throw new NotFoundException('Slot not found or inactive');
-    }
-
-    const user = await this.userRepo.findOne({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // ❗ Check if slot already booked by this user (optional rule)
-    const existing = await this.appointmentRepo.findOne({
-      where: {
-        slot: { id: slot.id },
-        patient: { id: userId },
-      },
-    });
-
-    if (existing) {
-      throw new BadRequestException('You already booked this slot');
-    }
-
-    const appointment = this.appointmentRepo.create({
-      patient: user,
-      slot,
-      status: 'BOOKED',
-    });
-
-    return this.appointmentRepo.save(appointment);
   }
 
-  // ===============================
-  // CANCEL BOOKING
-  // ===============================
-  async cancelBooking(appointmentId: number, userId: number) {
-    const appointment = await this.appointmentRepo.findOne({
-      where: { id: appointmentId },
-      relations: ['patient'],
+  async cancelAppointment(id: number, userId: number) {
+
+    return this.dataSource.transaction(async (manager) => {
+
+      const appointment = await manager.findOne(Appointment, {
+        where: { id },
+        relations: ['slot', 'patient', 'doctor'],
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!appointment)
+        throw new NotFoundException('Appointment not found');
+
+      if (appointment.status === AppointmentStatus.CANCELLED)
+        throw new BadRequestException('Already cancelled');
+
+      if (
+        appointment.patient.id !== userId &&
+        appointment.doctor.id !== userId
+      )
+        throw new ForbiddenException('Not authorized');
+
+      appointment.status = AppointmentStatus.CANCELLED;
+
+      if (appointment.slot && appointment.slot.currentPatients > 0) {
+        appointment.slot.currentPatients--;
+        await manager.save(appointment.slot);
+      }
+
+      return manager.save(appointment);
     });
-
-    if (!appointment) {
-      throw new NotFoundException('Appointment not found');
-    }
-
-    if (appointment.patient.id !== userId) {
-      throw new BadRequestException('Not allowed');
-    }
-
-    appointment.status = 'CANCELLED';
-
-    return this.appointmentRepo.save(appointment);
   }
 
-  // ===============================
-  // VIEW MY APPOINTMENTS
-  // ===============================
-  async getMyAppointments(userId: number) {
+  async getPatientAppointments(patientId: number) {
+
     return this.appointmentRepo.find({
-      where: {
-        patient: { id: userId },
-      },
-      relations: ['slot', 'slot.doctor'],
+      where: { patient: { id: patientId } },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getDoctorAppointments(doctorId: number) {
+
+    return this.appointmentRepo.find({
+      where: { doctor: { id: doctorId } },
       order: { createdAt: 'DESC' },
     });
   }

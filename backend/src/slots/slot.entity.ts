@@ -3,10 +3,11 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
-  OneToMany,
+  CreateDateColumn,
+  UpdateDateColumn,
+  JoinColumn,
 } from 'typeorm';
 import { User } from '../user/user.entity';
-import { Appointment } from '../appointment/appointment.entity';
 
 export enum SlotType {
   CUSTOM = 'CUSTOM',
@@ -18,19 +19,24 @@ export enum SlotMode {
   WAVE = 'WAVE',
 }
 
-@Entity()
+export enum SlotSession {
+  MORNING = 'MORNING',
+  AFTERNOON = 'AFTERNOON',
+  EVENING = 'EVENING',
+}
+
+@Entity({ name: 'slots' })
 export class Slot {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
-  date: string; // YYYY-MM-DD
+  // ✅ Proper Foreign Key
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'doctorId' })
+  doctor: User;
 
   @Column()
-  startTime: string;
-
-  @Column()
-  endTime: string;
+  doctorId: number; // 👈 Explicit FK column
 
   @Column({
     type: 'enum',
@@ -38,21 +44,33 @@ export class Slot {
   })
   slotType: SlotType;
 
-  @Column({
-    type: 'enum',
-    enum: SlotMode,
-  })
+  @Column({ type: 'enum', enum: SlotMode })
   mode: SlotMode;
 
-  @Column({ nullable: true })
-  capacity: number; // required only for WAVE
+  @Column({ type: 'enum', enum: SlotSession })
+  session: SlotSession;
 
-  @Column({ default: true })
-  isActive: boolean;
+  @Column({ type: 'date' })
+  date: string;
 
-  @ManyToOne(() => User, (user) => user.slots)
-  doctor: User;
+  @Column({ type: 'time' })
+  startTime: string;
 
-  @OneToMany(() => Appointment, (appt) => appt.slot)
-  appointments: Appointment[];
+  @Column({ type: 'time' })
+  endTime: string;
+
+  @Column({ type: 'int' })
+  duration: number;
+
+  @Column({ type: 'int' })
+  maxPatients: number;
+
+  @Column({ type: 'int', default: 0 })
+  currentPatients: number;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 }

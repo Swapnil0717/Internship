@@ -9,7 +9,8 @@ import { AppointmentModule } from './appointment/appointment.module';
 import { User } from './user/user.entity';
 import { Appointment } from './appointment/appointment.entity';
 import { Slot } from './slots/slot.entity';
-import { SlotModule } from './slots/slots.module';
+import { SlotsModule } from './slots/slots.module';
+import { LeaveModule } from './appointment/leave.module';
 
 @Module({
   imports: [
@@ -36,8 +37,9 @@ import { SlotModule } from './slots/slots.module';
     // MODULES
     AuthModule,
     UserModule,
-    SlotModule,
+    SlotsModule,
     AppointmentModule,
+    LeaveModule,
   ],
 })
 export class AppModule {}

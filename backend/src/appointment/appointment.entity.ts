@@ -2,27 +2,39 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   ManyToOne,
-  CreateDateColumn,
   Column,
+  CreateDateColumn,
 } from 'typeorm';
-import { User } from '../user/user.entity';
+
 import { Slot } from '../slots/slot.entity';
+import { User } from '../user/user.entity';
+
+export enum AppointmentStatus {
+  BOOKED = 'BOOKED',
+  CANCELLED = 'CANCELLED',
+}
 
 @Entity()
 export class Appointment {
+
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => User, (user) => user.appointments)
+  @ManyToOne(() => User)
   patient: User;
 
-  @ManyToOne(() => Slot, (slot) => slot.appointments, {
-    eager: true,
-  })
+  @ManyToOne(() => User)
+  doctor: User;
+
+  @ManyToOne(() => Slot)
   slot: Slot;
 
-  @Column({ default: 'BOOKED' })
-  status: string;
+  @Column({
+    type: 'enum',
+    enum: AppointmentStatus,
+    default: AppointmentStatus.BOOKED,
+  })
+  status: AppointmentStatus;
 
   @CreateDateColumn()
   createdAt: Date;
