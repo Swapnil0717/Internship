@@ -1,44 +1,46 @@
 import {
   Controller,
   Post,
-  Body,
-  UseGuards,
-  Req,
   Get,
-  ForbiddenException,
+  Body,
+  Req,
+  UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
-
-import { SlotService } from './slots.service';
+import { SlotsService } from './slots.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ElasticSlotDto } from './dto/elastic-update.dto';
 
 @Controller('slots')
 @UseGuards(JwtAuthGuard)
-export class SlotController {
-  constructor(private readonly slotService: SlotService) {}
+export class SlotsController {
+  constructor(private readonly slotsService: SlotsService) {}
 
   @Post()
-  createSlot(@Body() dto, @Req() req) {
-    if (req.user.role !== 'DOCTOR')
-      throw new ForbiddenException();
-
-    return this.slotService.createSlot(dto, req.user);
+  create(@Body() body: any, @Req() req: any) {
+    return this.slotsService.createSlot(body, req.user.id);
   }
 
-  @Get('doctor')
-  getDoctorSlots(@Req() req) {
-    return this.slotService.getDoctorSlots(req.user.sub);
+  @Get()
+  getMySlots(@Req() req: any) {
+    return this.slotsService.getDoctorSlots(req.user.id);
   }
 
-  @Post('elastic-update')
-  elasticUpdate(@Req() req, @Body() body) {
-    if (req.user.role !== 'DOCTOR')
-      throw new ForbiddenException();
-
-    return this.slotService.updateSlotElasticity(
-      req.user.sub,
-      body.slotId,
-      body.newStartTime,
-      body.newEndTime,
+  @Post('elastic')
+  elastic(
+    @Body() dto: { mainSlotId: number; newEndTime: string },
+    @Req() req: any,
+  ) {
+    const slotId = Number(dto.mainSlotId);
+  
+    if (isNaN(slotId)) {
+      throw new BadRequestException('Invalid mainSlotId');
+    }
+  
+    return this.slotsService.elasticUpdate(
+      slotId,
+      dto.newEndTime,
+      req.user.id, // ✅ now service accepts 3 params
     );
   }
-}
+  }

@@ -14,7 +14,6 @@ import { User } from '../user/user.entity';
 
 @Injectable()
 export class AppointmentService {
-
   constructor(
     @InjectRepository(Appointment)
     private appointmentRepo: Repository<Appointment>,
@@ -28,100 +27,131 @@ export class AppointmentService {
     private dataSource: DataSource,
   ) {}
 
+  // =====================================================
+  // BOOK APPOINTMENT
+  // =====================================================
+
   async bookAppointment(patientId: number, slotId: number) {
-
     return this.dataSource.transaction(async (manager) => {
-
+      
+      // 🔒 Lock slot row
       const slot = await manager
-          .createQueryBuilder(Slot, 'slot')
-          .innerJoinAndSelect('slot.doctor','doctor')
-          .setLock('pessimistic_write')
-          .where('slot.id = :id',{ id: slotId })
-          .getOne();
+        .createQueryBuilder(Slot, 'slot')
+        .innerJoinAndSelect('slot.doctor', 'doctor')
+        .setLock('pessimistic_write')
+        .where('slot.id = :id', { id: slotId })
+        .getOne();
 
-      if (!slot) throw new NotFoundException('Slot not found');
+      if (!slot) {
+        throw new NotFoundException('Slot not found');
+      }
+
+      if (slot.isParent) {
+        throw new BadRequestException('Parent slot cannot be booked');
+      }
 
       const patient = await manager.findOne(User, {
         where: { id: patientId },
       });
 
-      if (!patient || patient.role !== 'PATIENT')
-        throw new ForbiddenException('Only patient can book');
+      if (!patient) {
+        throw new NotFoundException('Patient not found');
+      }
 
-      if (slot.currentPatients >= slot.maxPatients)
-        throw new BadRequestException('Slot full');
+      if (patient.role !== 'PATIENT') {
+        throw new ForbiddenException('Only patients can book appointments');
+      }
 
-      const exists = await manager.findOne(Appointment, {
+      // 🚫 Check if already booked
+      const existingBooking = await manager.findOne(Appointment, {
         where: {
-          patient: { id: patientId },
-          slot: { id: slotId },
+          slot: { id: slot.id },
           status: AppointmentStatus.BOOKED,
         },
       });
 
-      if (exists)
-        throw new BadRequestException('Already booked');
+      if (existingBooking) {
+        throw new BadRequestException('Slot already booked');
+      }
 
-      slot.currentPatients++;
-
-      await manager.save(slot);
-
-      return manager.save(
-        manager.create(Appointment, {
-          patient,
-          doctor: slot.doctor,
-          slot,
+      // 🚫 Prevent patient double booking same slot
+      const duplicateBooking = await manager.findOne(Appointment, {
+        where: {
+          patient: { id: patientId },
+          slot: { id: slot.id },
           status: AppointmentStatus.BOOKED,
-        }),
-      );
-    });
-  }
-
-  async cancelAppointment(id: number, userId: number) {
-
-    return this.dataSource.transaction(async (manager) => {
-
-      const appointment = await manager.findOne(Appointment, {
-        where: { id },
-        relations: ['slot', 'patient', 'doctor'],
-        lock: { mode: 'pessimistic_write' },
+        },
       });
 
-      if (!appointment)
-        throw new NotFoundException('Appointment not found');
-
-      if (appointment.status === AppointmentStatus.CANCELLED)
-        throw new BadRequestException('Already cancelled');
-
-      if (
-        appointment.patient.id !== userId &&
-        appointment.doctor.id !== userId
-      )
-        throw new ForbiddenException('Not authorized');
-
-      appointment.status = AppointmentStatus.CANCELLED;
-
-      if (appointment.slot && appointment.slot.currentPatients > 0) {
-        appointment.slot.currentPatients--;
-        await manager.save(appointment.slot);
+      if (duplicateBooking) {
+        throw new BadRequestException('You already booked this slot');
       }
+
+      const appointment = manager.create(Appointment, {
+        patient,
+        doctor: slot.doctor,
+        slot,
+        status: AppointmentStatus.BOOKED,
+      });
 
       return manager.save(appointment);
     });
   }
 
-  async getPatientAppointments(patientId: number) {
+  // =====================================================
+  // CANCEL APPOINTMENT
+  // =====================================================
 
+  async cancelAppointment(appointmentId: number, userId: number) {
+    return this.dataSource.transaction(async (manager) => {
+
+      const appointment = await manager.findOne(Appointment, {
+        where: { id: appointmentId },
+        relations: ['slot', 'patient', 'doctor'],
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!appointment) {
+        throw new NotFoundException('Appointment not found');
+      }
+
+      if (appointment.status === AppointmentStatus.CANCELLED) {
+        throw new BadRequestException('Appointment already cancelled');
+      }
+
+      if (
+        appointment.patient.id !== userId &&
+        appointment.doctor.id !== userId
+      ) {
+        throw new ForbiddenException('Not authorized to cancel');
+      }
+
+      appointment.status = AppointmentStatus.CANCELLED;
+
+      return manager.save(appointment);
+    });
+  }
+
+  // =====================================================
+  // GET PATIENT APPOINTMENTS
+  // =====================================================
+
+  async getPatientAppointments(patientId: number) {
     return this.appointmentRepo.find({
       where: { patient: { id: patientId } },
+      relations: ['slot', 'doctor'],
       order: { createdAt: 'DESC' },
     });
   }
 
-  async getDoctorAppointments(doctorId: number) {
+  // =====================================================
+  // GET DOCTOR APPOINTMENTS
+  // =====================================================
 
+  async getDoctorAppointments(doctorId: number) {
     return this.appointmentRepo.find({
       where: { doctor: { id: doctorId } },
+      relations: ['slot', 'patient'],
       order: { createdAt: 'DESC' },
     });
   }
