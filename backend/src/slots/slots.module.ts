@@ -3,9 +3,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { Slot } from './slot.entity';
 import { User } from '../user/user.entity';
-import { SlotController } from './slots.controller';
-import { SlotService } from './slots.service';
+import { SlotsService } from './slots.service';
 import { SlotModificationLog } from './slot-modification-log.entity';
+import { SlotsController } from './slots.controller';
 
 @Module({
   imports: [
@@ -15,8 +15,8 @@ import { SlotModificationLog } from './slot-modification-log.entity';
       SlotModificationLog, 
     ]),
   ],
-  controllers: [SlotController],
-  providers: [SlotService],
-  exports: [SlotService],
+  controllers: [SlotsController],
+  providers: [SlotsService],
+  exports: [SlotsService],
 })
 export class SlotsModule {}

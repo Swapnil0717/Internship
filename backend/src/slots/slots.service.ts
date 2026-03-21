@@ -1,350 +1,333 @@
 import {
   Injectable,
   BadRequestException,
-  NotFoundException,
 } from '@nestjs/common';
-
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-
-import { Slot, SlotType, SlotMode } from './slot.entity';
-import { User } from '../user/user.entity';
 import {
-  Appointment,
-  AppointmentStatus,
-} from '../appointment/appointment.entity';
+  Repository,
+  DataSource,
+  EntityManager,
+} from 'typeorm';
+import { Slot, SlotType } from './slot.entity';
 
 @Injectable()
-export class SlotService {
+export class SlotsService {
   constructor(
     @InjectRepository(Slot)
     private slotRepo: Repository<Slot>,
-
-    @InjectRepository(User)
-    private userRepo: Repository<User>,
-
     private dataSource: DataSource,
   ) {}
 
-  // ------------------------------------------------
-  // CREATE SLOT
-  // ------------------------------------------------
+  /* ================= TIME UTILS ================= */
 
-  async createSlot(dto: any, doctorPayload: any) {
-    const doctor = await this.userRepo.findOne({
-      where: { id: doctorPayload.sub },
-    });
-
-    if (!doctor)
-      throw new BadRequestException('Doctor not found');
-
-    const {
-      slotType,
-      date,
-      startDate,
-      endDate,
-      days,
-      startTime,
-      endTime,
-      duration,
-      maxPatients,
-      mode,
-      session,
-    } = dto;
-
-    const queryRunner = this.dataSource.createQueryRunner();
-
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      let result;
-
-      if (slotType === SlotType.CUSTOM) {
-        result = await this.generateForSingleDate(
-          queryRunner,
-          date,
-          startTime,
-          endTime,
-          duration,
-          maxPatients,
-          mode,
-          session,
-          doctor,
-        );
-      }
-
-      if (slotType === SlotType.RECURRING) {
-        result = await this.generateRecurring(
-          queryRunner,
-          startDate,
-          endDate,
-          this.mapDaysToNumbers(days),
-          startTime,
-          endTime,
-          duration,
-          maxPatients,
-          mode,
-          session,
-          doctor,
-        );
-      }
-
-      await queryRunner.commitTransaction();
-      return result;
-    } catch (err) {
-      await queryRunner.rollbackTransaction();
-      throw err;
-    } finally {
-      await queryRunner.release();
-    }
-  }
-
-  // ------------------------------------------------
-  // SLOT GENERATORS
-  // ------------------------------------------------
-
-  private async generateForSingleDate(
-    queryRunner,
-    date: string,
-    startTime: string,
-    endTime: string,
-    duration: number,
-    maxPatients: number,
-    mode: SlotMode,
-    session: any,
-    doctor: User,
-  ) {
-    let start = this.toDateTime(startTime);
-    const end = this.toDateTime(endTime);
-
-    const slots: Slot[] = [];
-
-    while (start < end) {
-      const next = new Date(start);
-      next.setMinutes(next.getMinutes() + duration);
-
-      if (next > end) break;
-
-      const startStr = this.toTime(start);
-      const endStr = this.toTime(next);
-
-      const overlap = await queryRunner.manager
-        .createQueryBuilder(Slot, 'slot')
-        .where(
-          `slot.date=:date
-           AND slot.doctorId=:doctorId
-           AND (:start < slot.endTime AND :end > slot.startTime)`,
-          {
-            date,
-            doctorId: doctor.id,
-            start: startStr,
-            end: endStr,
-          },
-        )
-        .getOne();
-
-      if (overlap)
-        throw new BadRequestException('Overlapping slot');
-
-      slots.push(
-        queryRunner.manager.create(Slot, {
-          doctorId: doctor.id,
-          slotType: SlotType.CUSTOM,
-          mode,
-          session,
-          date,
-          startTime: startStr,
-          endTime: endStr,
-          duration,
-          maxPatients: mode === SlotMode.WAVE ? maxPatients : 1,
-          currentPatients: 0,
-          doctor,
-        }),
-      );
-
-      start = next;
-    }
-
-    return queryRunner.manager.save(slots);
-  }
-
-  // ------------------------------------------------
-  // RECURRING SLOT
-  // ------------------------------------------------
-
-  private async generateRecurring(
-    queryRunner,
-    startDate: string,
-    endDate: string,
-    days: number[],
-    startTime: string,
-    endTime: string,
-    duration: number,
-    maxPatients: number,
-    mode: SlotMode,
-    session: any,
-    doctor: User,
-  ) {
-    let current = new Date(startDate);
-    const end = new Date(endDate);
-
-    const slots: Slot[] = [];
-
-    while (current <= end) {
-      if (days.includes(current.getDay())) {
-        let start = this.toDateTime(startTime);
-        const dayEnd = this.toDateTime(endTime);
-
-        while (start < dayEnd) {
-          const next = new Date(start);
-          next.setMinutes(next.getMinutes() + duration);
-
-          if (next > dayEnd) break;
-
-          const dateStr = current.toISOString().split('T')[0];
-
-          const startStr = this.toTime(start);
-          const endStr = this.toTime(next);
-
-          const overlap = await queryRunner.manager
-            .createQueryBuilder(Slot, 'slot')
-            .where(
-              `slot.date=:date
-               AND slot.doctorId=:doctorId
-               AND (:start < slot.endTime AND :end > slot.startTime)`,
-              {
-                date: dateStr,
-                doctorId: doctor.id,
-                start: startStr,
-                end: endStr,
-              },
-            )
-            .getOne();
-
-          if (overlap)
-            throw new BadRequestException('Overlapping slot');
-
-          slots.push(
-            queryRunner.manager.create(Slot, {
-              doctorId: doctor.id,
-              slotType: SlotType.RECURRING,
-              mode,
-              session,
-              date: dateStr,
-              startTime: startStr,
-              endTime: endStr,
-              duration,
-              maxPatients:
-                mode === SlotMode.WAVE ? maxPatients : 1,
-              currentPatients: 0,
-              doctor,
-            }),
-          );
-
-          start = next;
-        }
-      }
-
-      current.setDate(current.getDate() + 1);
-    }
-
-    return queryRunner.manager.save(slots);
-  }
-
-  // ------------------------------------------------
-  // ⭐ ELASTIC ENGINE
-  // ------------------------------------------------
-
-  async updateSlotElasticity(
-    doctorId: number,
-    slotId: number,
-    newStartTime: string,
-    newEndTime: string,
-  ) {
-    return this.dataSource.transaction(async (manager) => {
-      const slot = await manager.findOne(Slot, {
-        where: { id: slotId, doctorId },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!slot)
-        throw new NotFoundException('Slot not found');
-
-      const bookingCount = await manager.count(Appointment, {
-        where: {
-          slot: { id: slotId },
-          status: AppointmentStatus.BOOKED,
-        },
-      });
-
-      // SHRINK SAFETY
-      const availableCapacityAfterShrink =
-        Math.floor(
-          (this.timeToMinutes(newEndTime) -
-            this.timeToMinutes(slot.startTime)) /
-            slot.duration,
-        );
-
-      if (
-        bookingCount > availableCapacityAfterShrink
-      ) {
-        throw new BadRequestException(
-          'Shrink denied: bookings exceed capacity',
-        );
-      }
-
-      // Apply elasticity
-      slot.startTime = newStartTime;
-      slot.endTime = newEndTime;
-
-      await manager.save(slot);
-
-      return { message: 'Slot elasticity updated' };
-    });
-  }
-
-  // ------------------------------------------------
-  // FETCH DOCTOR SLOTS
-  // ------------------------------------------------
-
-  async getDoctorSlots(doctorId: number) {
-    return this.slotRepo.find({
-      where: { doctorId },
-      order: { date: 'ASC', startTime: 'ASC' },
-    });
-  }
-
-  // ------------------------------------------------
-  // HELPERS
-  // ------------------------------------------------
-
-  private mapDaysToNumbers(days: string[]): number[] {
-    const map: Record<string, number> = {
-      Sunday: 0,
-      Monday: 1,
-      Tuesday: 2,
-      Wednesday: 3,
-      Thursday: 4,
-      Friday: 5,
-      Saturday: 6,
-    };
-
-    return days
-      .map((d) => map[d])
-      .filter((v) => v !== undefined);
-  }
-
-  private timeToMinutes(time: string): number {
+  private toMinutes(time: string): number {
     const [h, m] = time.split(':').map(Number);
     return h * 60 + m;
   }
 
-  private toDateTime(time: string): Date {
-    return new Date(`1970-01-01T${time}:00`);
+  private toTime(minutes: number): string {
+    const h = Math.floor(minutes / 60)
+      .toString()
+      .padStart(2, '0');
+    const m = Math.floor(minutes % 60)
+      .toString()
+      .padStart(2, '0');
+    return `${h}:${m}:00`;
   }
 
-  private toTime(date: Date): string {
-    return date.toTimeString().slice(0, 5);
+  private normalizeTime(input: string): string {
+    const cleaned = input.replace('.', ':');
+    const minutes = this.toMinutes(cleaned);
+    return this.toTime(minutes);
+  }
+
+  /* ================= CREATE SLOT ================= */
+
+  async createSlot(dto: any, doctorId: number) {
+    if (dto.slotType === SlotType.CUSTOM)
+      return this.createCustom(dto, doctorId);
+
+    if (dto.slotType === SlotType.RECURRING)
+      return this.createRecurring(dto, doctorId);
+
+    throw new BadRequestException('Invalid slotType');
+  }
+
+  /* ================= SUB SLOT GENERATOR ================= */
+
+  private async generateSubSlots(
+    manager: EntityManager,
+    parent: Slot,
+  ) {
+    const start = this.toMinutes(parent.startTime);
+    const end = this.toMinutes(parent.endTime);
+
+    let current = start;
+
+    while (current < end) {
+      const next = current + parent.duration;
+
+      const child = manager.create(Slot, {
+        doctorId: parent.doctorId,
+        slotType: parent.slotType,
+        mode: parent.mode,
+        session: parent.session,
+        date: parent.date,
+        startTime: this.toTime(current),
+        endTime:
+          next > end
+            ? this.toTime(end)
+            : this.toTime(next),
+        duration: parent.duration,
+        maxPatients: 1,
+        isParent: false,
+        branchId: parent.id,
+      });
+
+      await manager.save(child);
+      current = next;
+    }
+  }
+
+  /* ================= CUSTOM SLOT ================= */
+
+  private async createCustom(dto: any, doctorId: number) {
+    return this.dataSource.transaction(async (m) => {
+
+      const startTime = this.normalizeTime(dto.startTime);
+      const endTime = this.normalizeTime(dto.endTime);
+
+      await m.delete(Slot, {
+        doctorId,
+        date: dto.date,
+        isParent: true,
+      });
+
+      const parent = m.create(Slot, {
+        ...dto,
+        doctorId,
+        startTime,
+        endTime,
+        duration: dto.duration,
+        isParent: true,
+      });
+
+      const saved = await m.save(parent);
+
+      await this.generateSubSlots(m, saved);
+
+      return m.findOne(Slot, {
+        where: { id: saved.id },
+        relations: ['children'],
+      });
+    });
+  }
+
+  /* ================= RECURRING SLOT ================= */
+
+  private async createRecurring(dto: any, doctorId: number) {
+    const dayMap = {
+      SUNDAY: 0,
+      MONDAY: 1,
+      TUESDAY: 2,
+      WEDNESDAY: 3,
+      THURSDAY: 4,
+      FRIDAY: 5,
+      SATURDAY: 6,
+    };
+
+    const results: Slot[] = [];
+
+    return this.dataSource.transaction(async (m) => {
+      const start = new Date(dto.startDate);
+      const end = new Date(dto.endDate);
+
+      for (
+        let d = new Date(start);
+        d <= end;
+        d.setDate(d.getDate() + 1)
+      ) {
+        const dayName = Object.keys(dayMap).find(
+          (k) => dayMap[k] === d.getDay(),
+        );
+
+        if (!dto.days.includes(dayName)) continue;
+
+        const dateStr = d.toISOString().split('T')[0];
+
+        const startTime = this.normalizeTime(dto.startTime);
+        const endTime = this.normalizeTime(dto.endTime);
+
+        const parent = m.create(Slot, {
+          doctorId,
+          slotType: SlotType.RECURRING,
+          mode: dto.mode,
+          session: dto.session,
+          date: dateStr,
+          startTime,
+          endTime,
+          duration: dto.duration,
+          maxPatients: Math.floor(
+            (this.toMinutes(endTime) -
+              this.toMinutes(startTime)) /
+              dto.duration,
+          ),
+          isParent: true,
+        });
+
+        const saved = await m.save(parent);
+
+        await this.generateSubSlots(m, saved);
+
+        const full = await m.findOne(Slot, {
+          where: { id: saved.id },
+          relations: ['children'],
+        });
+
+        if (full) results.push(full);
+      }
+
+      return results;
+    });
+  }
+
+  /* ================= ELASTIC UPDATE ================= */
+
+  async elasticUpdate(
+    mainSlotId: number,
+    newEndTime: string,
+    doctorId: number,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+
+      const mainSlot = await manager.findOne(Slot, {
+        where: { id: mainSlotId, doctorId, isParent: true },
+      });
+
+      if (!mainSlot) {
+        throw new BadRequestException('Main slot not found');
+      }
+
+      /* ===== 1 HOUR MODIFICATION RESTRICTION ===== */
+
+      const slotDateTime = new Date(
+        `${mainSlot.date}T${mainSlot.startTime}+05:30`,
+      );
+
+      const oneHourBefore = new Date(
+        slotDateTime.getTime() - 60 * 60 * 1000,
+      );
+
+      const now = new Date();
+
+      if (now >= oneHourBefore) {
+        throw new BadRequestException(
+          'Slot cannot be modified within 1 hour of start time',
+        );
+      }
+
+      const formattedEndTime = this.normalizeTime(newEndTime);
+
+      const startMinutes = this.toMinutes(mainSlot.startTime);
+      const newEndMinutes = this.toMinutes(formattedEndTime);
+      const oldEndMinutes = this.toMinutes(mainSlot.endTime);
+
+      if (newEndMinutes === oldEndMinutes) {
+        throw new BadRequestException('No time change detected');
+      }
+
+      if (newEndMinutes <= startMinutes) {
+        throw new BadRequestException('Invalid time range');
+      }
+
+      const subSlots = await manager.find(Slot, {
+        where: { branchId: mainSlotId },
+        order: { startTime: 'ASC' },
+      });
+
+      if (subSlots.length === 0) {
+        throw new BadRequestException('No subslots found');
+      }
+
+      /* ================= SHRINK ================= */
+
+      if (newEndMinutes < oldEndMinutes) {
+
+        const newDuration = Math.floor(
+          (newEndMinutes - startMinutes) / subSlots.length,
+        );
+
+        let cursor = startMinutes;
+
+        for (let sub of subSlots) {
+          sub.startTime = this.toTime(cursor);
+          sub.endTime = this.toTime(cursor + newDuration);
+          cursor += newDuration;
+        }
+
+        mainSlot.endTime = formattedEndTime;
+        mainSlot.duration = newDuration;
+
+        await manager.save(subSlots);
+        await manager.save(mainSlot);
+
+        return {
+          message: 'Slot shrunk successfully',
+          newDuration,
+        };
+      }
+
+      /* ================= EXPAND ================= */
+
+      else {
+
+        const duration = mainSlot.duration;
+        let lastEndTime =
+          this.toMinutes(subSlots[subSlots.length - 1].endTime);
+
+        const newSubSlots: Slot[] = [];
+
+        while (lastEndTime + duration <= newEndMinutes) {
+
+          const sub = manager.create(Slot, {
+            doctorId,
+            slotType: mainSlot.slotType,
+            mode: mainSlot.mode,
+            session: mainSlot.session,
+            date: mainSlot.date,
+            startTime: this.toTime(lastEndTime),
+            endTime: this.toTime(lastEndTime + duration),
+            duration,
+            maxPatients: 1,
+            isParent: false,
+            branchId: mainSlot.id,
+          });
+
+          newSubSlots.push(sub);
+          lastEndTime += duration;
+        }
+
+        mainSlot.endTime = formattedEndTime;
+
+        await manager.save(newSubSlots);
+        await manager.save(mainSlot);
+
+        return {
+          message: 'Slot expanded successfully',
+          addedSlots: newSubSlots.length,
+        };
+      }
+
+    });
+  }
+
+  /* ================= GET DOCTOR SLOTS ================= */
+
+  async getDoctorSlots(doctorId: number) {
+    return this.slotRepo.find({
+      where: { doctorId, isParent: true },
+      relations: ['children'],
+      order: { date: 'ASC' },
+    });
   }
 }

@@ -3,9 +3,10 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  OneToMany,
+  JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
-  JoinColumn,
 } from 'typeorm';
 import { User } from '../user/user.entity';
 
@@ -25,23 +26,19 @@ export enum SlotSession {
   EVENING = 'EVENING',
 }
 
-@Entity({ name: 'slots' })
+@Entity()
 export class Slot {
   @PrimaryGeneratedColumn()
   id: number;
 
-  // ✅ Proper Foreign Key
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @Column()
+  doctorId: number;
+
+  @ManyToOne(() => User)
   @JoinColumn({ name: 'doctorId' })
   doctor: User;
 
-  @Column()
-  doctorId: number; // 👈 Explicit FK column
-
-  @Column({
-    type: 'enum',
-    enum: SlotType,
-  })
+  @Column({ type: 'enum', enum: SlotType })
   slotType: SlotType;
 
   @Column({ type: 'enum', enum: SlotMode })
@@ -59,14 +56,30 @@ export class Slot {
   @Column({ type: 'time' })
   endTime: string;
 
-  @Column({ type: 'int' })
+  @Column()
   duration: number;
 
-  @Column({ type: 'int' })
+  @Column()
   maxPatients: number;
 
-  @Column({ type: 'int', default: 0 })
-  currentPatients: number;
+  @Column({ default: true })
+  isParent: boolean;
+
+  /* 🔥 branchId replaces parentId */
+  @Column({ nullable: true })
+  branchId: number;
+
+  @Column({ nullable: true })
+  patientId: number;
+
+  @OneToMany(() => Slot, (slot) => slot.branchParent)
+  children: Slot[];
+
+  @ManyToOne(() => Slot, (slot) => slot.children, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'branchId' })
+  branchParent: Slot;
 
   @CreateDateColumn()
   createdAt: Date;
